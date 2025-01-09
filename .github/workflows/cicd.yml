@@ -56,7 +56,7 @@ jobs:
 
       - name: Set up Docker authentication for GHCR
         run: |
-          sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
+          echo "${{ secrets.GHCRPASS }}" | sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin
 
       - name: Install Kubernetes
         shell: bash 
