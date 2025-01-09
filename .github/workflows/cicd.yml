@@ -6,7 +6,7 @@ on:
       server_ip:
         description: 'The server IP address'
         required: true
-        default: '10.176.27.143'
+        default: '54.92.193.42'
       branch_name:
         description: 'The branch name to use'
         required: true
@@ -14,7 +14,7 @@ on:
 
 jobs:
   install:
-    runs-on: [self-hosted]  # Using our own self-hosted runner
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
