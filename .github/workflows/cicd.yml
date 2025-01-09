@@ -14,7 +14,7 @@ on:
 
 jobs:
   install:
-    runs-on: [self-hosted]  # Using our own self hosted runner
+    runs-on: [self-hosted]  # Using our own self-hosted runner
 
     steps:
       - name: Checkout Code
@@ -24,12 +24,14 @@ jobs:
         run: |
           echo "SERVER_IP=${{ github.event.inputs.server_ip }}" >> $GITHUB_ENV
           echo "BRANCH_NAME=${{ github.event.inputs.branch_name }}" >> $GITHUB_ENV
+
       - name: Remove Conflicting Packages
         run: |
           sudo apt-get remove --purge -y containerd
           sudo apt-get autoremove -y
-          sudo apt-mark unhold containerd || true  # Ensure no held packages
+          sudo apt-mark unhold containerd || true
           sudo apt-get update -y
+
       - name: Install Prerequisites
         run: |
           if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
@@ -42,38 +44,44 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y containerd.io
           sudo apt-get install -y git curl make net-tools pipx python3-venv sshpass netplan.io iptables jq sed
-          pipx install --include-deps ansible || true  # Ignore if already installed
+          pipx install --include-deps ansible || true
           pipx ensurepath
-          make --version  # Verify make installation
-          echo "PATH=$PATH:/usr/bin:$HOME/.local/bin" >> $GITHUB_ENV
-          source $GITHUB_ENV  # Ensure new PATH is applied
+          make --version
+
       - name: Debug PATH and Installed Tools
         run: |
           echo "Current PATH: $PATH"
           which sed || echo "sed not found"
           ls -l /usr/bin/sed || echo "/usr/bin/sed not found"
-      - name: Update Configuration Files
-        shell: bash
-        run: |
-          # Replace content of line 2 with the new node1 IP and credentials
-          #sed -i '2s/.*/node1 ansible_host=localhost ansible_user=ios5gn ansible_password=ios5gn ansible_sudo_pass=ios5gn/' hosts.ini
-          ##sed -i '3s/^/#/' hosts.ini
-          #sed -i '10s/^/#/' hosts.ini
-          #sed -i '11s/^/#/' hosts.ini
-          # Verify the updated hosts.ini content
-          echo "Updated hosts.ini content:"
-          cat hosts.ini
+
       - name: Set up Docker authentication for GHCR
         run: |
           sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
-          
+
       - name: Install Kubernetes
         shell: bash 
         run: |
-          make aether-k8s-install  # Running from repo home
-        
+          make aether-k8s-install
+
       - name: Install SD-Core
         run: |
-          make aether-5gc-install  # Running from repo home
+          make aether-5gc-install
           kubectl get pods -n omec
-    
+
+  test:
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Test Kubernetes Pods
+        run: |
+          echo "Checking if pods are deployed..."
+          kubectl get pods -n omec
+          if [[ $(kubectl get pods -n omec | grep Running | wc -l) -gt 0 ]]; then
+            echo "Deployment successful: Pods are running."
+          else
+            echo "Deployment failed: No running pods found."
+            exit 1
+          fi
