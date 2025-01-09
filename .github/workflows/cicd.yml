@@ -61,8 +61,8 @@ jobs:
       - name: Install Kubernetes
         shell: bash 
         run: |
-          cd path/to/Makefile
-          make aether-k8s-install
+          make -f custom-makefile-name aether-k8s-install
+          
 
       - name: Install SD-Core
         run: |
