@@ -202,25 +202,20 @@ jobs:
           # make aether-5gc-install --validate=false  # Running from repo home
           # kubectl get pods -n omec
 
-      - name: Trigger Jenkins Testing Job
+      - name: Testing jenkins jobs
         run: |
-          set -e
-          JOB_NAME="pipeline1" 
+          JOB_NAME="pipeline1"
           USERNAME="nive"
           TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
           JENKINS_URL="http://52.23.210.174:8080/"
-          TEST_URL="${JENKINS_URL}job/${JOB_NAME}/build"
+          PARAMS="RUN_BASIC_ENV=true&RUN_FILE_OPS=false&RUN_NETWORK_TEST=false&RUN_BUILD_SIM=false"  # Example parameters
+          TEST_URL="${JENKINS_URL}job/${JOB_NAME}/buildWithParameters?$PARAMS"
           TEST_RESPONSE=$(curl -v -X POST -u $USERNAME:$TOKEN "$TEST_URL" -i)
-
-         
           HTTP_STATUS_TEST=$(echo "$TEST_RESPONSE" | head -n 1 | awk '{print $2}')
           echo "Testing job response status: $HTTP_STATUS_TEST"
-
-          
           if [[ "$HTTP_STATUS_TEST" != "201" ]]; then
             echo "Error triggering testing job. HTTP Status: $HTTP_STATUS_TEST"
             exit 1
           fi
-
           echo "Testing job triggered successfully."
-    
+
