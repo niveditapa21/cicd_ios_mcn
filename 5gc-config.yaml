@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: 5gc-amf
+  namespace: 5gc-network
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: 5gc-amf
+  template:
+    metadata:
+      labels:
+        app: 5gc-amf
+    spec:
+      containers:
+      - name: amf
+        image: "free5gc/amf:latest"
+        ports:
+        - containerPort: 38412
+        env:
+          - name: AMF_IP
+            value: "amf-service"
+          - name: NRF_IP
+            value: "nrf-service"
+          - name: SMF_IP
+            value: "smf-service"
+          # ... other AMF specific environment variables
+      restartPolicy: Always
+      nodeSelector: 
+        kubernetes.io/os: linux
+
+--- 
+apiVersion: v1
+kind: Service
+metadata:
+  name: amf-service
+  namespace: 5gc-network
+spec:
+  selector:
+    app: 5gc-amf
+  ports:
+  - port: 38412
+    targetPort: 38412
+    name: amf
+  type: ClusterIP 
+
+---
+# Repeat for other 5GC components (NRF, SMF, UPF, PCF, etc.)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: 5gc-nrf
+  namespace: 5gc-network
+spec:
+  # ... configuration for NRF
+  
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrf-service
+  namespace: 5gc-network
+spec:
+  # ... configuration for NRF service 
