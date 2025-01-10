@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aether-deployment
+  labels:
+    app: aether
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aether
+  template:
+    metadata:
+      labels:
+        app: aether
+    spec:
+      containers:
+      - name: aether
+        image: your-aether-image:latest  # Replace with your Aether container image
+        ports:
+        - containerPort: 8080  # Adjust based on Aether service port
+        env:
+          - name: CONFIG_FILE
+            value: /config/aether.yaml  # Path to your Aether configuration file within the container
+          # Add any other required environment variables here
+      volumeMounts:
+        - mountPath: /config
+          name: config-volume
+      volumes:
+        - name: config-volume
+          configMap:
+            name: aether-configmap  # Create a ConfigMap named "aether-configmap" to store your configuration 
