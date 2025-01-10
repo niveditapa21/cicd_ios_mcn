@@ -205,9 +205,11 @@ jobs:
       - name: Trigger Jenkins Testing Job
         run: |
           set -e
-          TEST_JOB_NAME="pipeline1"  
+          JOB_NAME="pipeline1" 
+          USERNAME="nive"
+          TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c
           JENKINS_URL="http://52.23.210.174:8080/"
-          TEST_URL="${JENKINS_URL}job/${TEST_JOB_NAME}/build"
+          TEST_URL="${JENKINS_URL}job/${JOB_NAME}/build"
           TEST_RESPONSE=$(curl -v -X POST -u $USERNAME:$TOKEN "$TEST_URL" -i)
 
          
