@@ -204,21 +204,46 @@ jobs:
 
       - name: Testing Jenkins Job Trigger
         run: |
-          JOB_NAME="pipeline1"
-          USERNAME="nive"
-          TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
-          JENKINS_URL="http://52.23.210.174:8080/"
-          PARAMS="RUN_BASIC_ENV=true&RUN_FILE_OPS=false&RUN_NETWORK_TEST=false&RUN_BUILD_SIM=false"
-          TEST_URL="${JENKINS_URL}job/${JOB_NAME}/buildWithParameters?$PARAMS"
-          TEST_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response_body.txt -X POST -u $USERNAME:$TOKEN "$TEST_URL")
-          HTTP_STATUS_TEST="${TEST_RESPONSE: -3}"
-          RESPONSE_BODY=$(cat /tmp/response_body.txt)
-          echo "Jenkins response status for test job: $HTTP_STATUS_TEST"
-          echo "Jenkins response body: $RESPONSE_BODY"
-          if [[ "$HTTP_STATUS_TEST" != "201" ]]; then
-            echo "Error triggering testing job. HTTP Status: $HTTP_STATUS_TEST"
-            echo "Response body: $RESPONSE_BODY"
+         JOB_NAME="pipeline1"
+         USERNAME="nive"
+         TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
+         JENKINS_URL="http://52.23.210.174:8080/"
+         PARAMS="RUN_BASIC_ENV=true&RUN_FILE_OPS=false&RUN_NETWORK_TEST=false&RUN_BUILD_SIM=false"
+         TEST_URL="${JENKINS_URL}job/${JOB_NAME}/buildWithParameters?$PARAMS"
+         TEST_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response_body.txt -X POST -u $USERNAME:$TOKEN "$TEST_URL")
+         HTTP_STATUS_TEST="${TEST_RESPONSE: -3}"
+         RESPONSE_BODY=$(cat /tmp/response_body.txt)
+         echo "Jenkins response status for test job: $HTTP_STATUS_TEST"
+         echo "Jenkins response body: $RESPONSE_BODY"
+         if [[ "$HTTP_STATUS_TEST" != "201" ]]; then
+          echo "Error triggering testing job. HTTP Status: $HTTP_STATUS_TEST"
+          echo "Response body: $RESPONSE_BODY"
+          exit 1
+         fi
+         echo "Testing job triggered successfully."
+         QUEUE_URL=$(echo "$RESPONSE_BODY" | grep -Fi Location | awk '{print $2}' | tr -d '\r')
+         if [ -z "$QUEUE_URL" ]; then
+           echo "Queue URL not found. Skipping log fetch."
+         else
+          echo "Polling Jenkins queue to fetch build number..."
+          BUILD_NUMBER="null"
+          for i in {1..30}; do
+            BUILD_NUMBER=$(curl -s -u $USERNAME:$TOKEN "${QUEUE_URL}api/json" | jq -r '.executable.number')
+            if [ "$BUILD_NUMBER" != "null" ]; then
+              echo "Build number: $BUILD_NUMBER"
+              break
+            fi
+            echo "Waiting for build to be scheduled... Attempt: $i"
+            sleep 5
+          done
+
+          if [ "$BUILD_NUMBER" == "null" ]; then
+            echo "Failed to retrieve build number after multiple attempts."
             exit 1
           fi
-            echo "Testing job triggered successfully."
 
+          echo "Fetching Jenkins job console logs for build $BUILD_NUMBER..."
+          BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
+          echo "Latest build logs:"
+          echo "$BUILD_LOG"
+         fi
