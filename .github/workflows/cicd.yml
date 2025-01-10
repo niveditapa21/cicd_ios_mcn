@@ -211,6 +211,17 @@ jobs:
         run: |
           sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
 
+         # name: Install Kubernetes
+        #shell: bash 
+        #run: |
+          #make aether-k8s-install --validate=false # Running from repo home
+        
+      # name: Install SD-Core
+        # run: |
+          # make aether-5gc-install --validate=false  # Running from repo home
+          # kubectl get pods -n omec
+
+
       # Testing Jenkins Job Trigger
       - name: Testing jenkins jobs
         run: |
