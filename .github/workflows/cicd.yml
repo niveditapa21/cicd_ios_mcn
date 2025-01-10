@@ -165,17 +165,32 @@ jobs:
           echo "Current PATH: $PATH"
           which sed || echo "sed not found"
           ls -l /usr/bin/sed || echo "/usr/bin/sed not found"
+      - name: Verify hosts.ini File
+        run: |
+          if [ ! -f hosts.ini ]; then
+            echo "hosts.ini file is missing. Creating a placeholder."
+            echo "[all]" > hosts.ini  # Add basic structure for Ansible
+          fi
+          echo "hosts.ini file verified."
+
       - name: Update Configuration Files
         shell: bash
         run: |
-          # Replace content of line 2 with the new node1 IP and credentials
-          #sed -i '2s/.*/node1 ansible_host=localhost ansible_user=ios5gn ansible_password=ios5gn ansible_sudo_pass=ios5gn/' hosts.ini
-          ##sed -i '3s/^/#/' hosts.ini
-          #sed -i '10s/^/#/' hosts.ini
-          #sed -i '11s/^/#/' hosts.ini
-          # Verify the updated hosts.ini content
-          echo "Updated hosts.ini content:"
-          cat hosts.ini
+          # Check if the hosts.ini file exists
+          if [ -f hosts.ini ]; then
+            # Replace content of line 2 with the new node1 IP and credentials
+            sed -i '2s/.*/node1 ansible_host=localhost ansible_user=ios5gn ansible_password=ios5gn ansible_sudo_pass=ios5gn/' hosts.ini
+            # Comment out lines 3, 10, and 11 as required
+            sed -i '3s/^/#/' hosts.ini
+            sed -i '10s/^/#/' hosts.ini
+            sed -i '11s/^/#/' hosts.ini
+            # Verify the updated hosts.ini content
+            echo "Updated hosts.ini content:"
+            cat hosts.ini
+          else
+            echo "hosts.ini file not found. Cannot proceed with updates."
+            exit 1
+          fi
       - name: Set up Docker authentication for GHCR
         run: |
           sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
