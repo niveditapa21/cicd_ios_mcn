@@ -3,67 +3,86 @@ name: GHCR - Install SD-Core 5G
 on:
   workflow_dispatch:
     inputs:
-      server_ip:
-        description: 'The server IP address'
+      deployment_server:
+        description: "The IP address of the server to deploy to"
         required: true
-        default: '52.23.210.174'
-      branch_name:
-        description: 'The branch name to use'
-        required: true
-        default: 'main'
+        default: "52.23.210.174"
       port:
         description: "The port to deploy the application on (between 8000 and 9000)"
         required: true
         default: "8080"
+      branch_name:
+        description: "The Git branch to build from"
+        required: true
+        default: "main"
+      run_basic_env:
+        description: "Run Basic Environment Check"
+        required: true
+        default: true
+      run_file_ops:
+        description: "Run File Operations Test"
+        required: true
+        default: false
+      run_network_test:
+        description: "Run Network Connectivity Test"
+        required: true
+        default: false
+      run_build_sim:
+        description: "Run Build Simulation"
+        required: true
+        default: false
 
 jobs:
-  install:
+  trigger-and-check-jenkins:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Basic Environment Check
+      - name: Trigger Jenkins Parameterized Job
         run: |
           set -e
-          JOB_NAME="pipeline1"
           JENKINS_URL="http://52.23.210.174:8080/"
+          JOB_NAME="pipeline1"
           USERNAME="nive"
-          TOKEN="11b1e6f6d299def40613f769564a398f16"
-          DEPLOYMENT_SERVER="${{ github.event.inputs.deployment_server }}"
-          PORT="${{ github.event.inputs.port }}"
-          BRANCH_NAME="${{ github.event.inputs.branch_name }}"
-
-          # URL encode parameters
-          DEPLOYMENT_SERVER_ENCODED=$(echo $DEPLOYMENT_SERVER | jq -s -R -r @uri)
-          PORT_ENCODED=$(echo $PORT | jq -s -R -r @uri)
-          BRANCH_NAME_ENCODED=$(echo $BRANCH_NAME | jq -s -R -r @uri)
-
-          # Trigger the Jenkins parameterized job with inputs
-          TRIGGER_RESPONSE=$(curl -X POST -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?DEPLOYMENT_SERVER=$DEPLOYMENT_SERVER_ENCODED&PORT=$PORT_ENCODED&BRANCH_NAME=$BRANCH_NAME_ENCODED" -i)
+          TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
           
-          # Extract the queue URL from the trigger response to track the build
+          # Extract inputs from workflow dispatch
+          RUN_BASIC_ENV=${{ github.event.inputs.run_basic_env }}
+          RUN_FILE_OPS=${{ github.event.inputs.run_file_ops }}
+          RUN_NETWORK_TEST=${{ github.event.inputs.run_network_test }}
+          RUN_BUILD_SIM=${{ github.event.inputs.run_build_sim }}
+          
+          # Trigger Jenkins job with parameters
+          TRIGGER_RESPONSE=$(curl -v -X POST -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?RUN_BASIC_ENV=$RUN_BASIC_ENV&RUN_FILE_OPS=$RUN_FILE_OPS&RUN_NETWORK_TEST=$RUN_NETWORK_TEST&RUN_BUILD_SIM=$RUN_BUILD_SIM" -i)
+          
+          # Check HTTP status code for success (201)
+          HTTP_STATUS=$(echo "$TRIGGER_RESPONSE" | head -n 1 | awk '{print $2}')
+          echo "Jenkins response status: $HTTP_STATUS"
+          if [[ "$HTTP_STATUS" != "201" ]]; then
+            echo "Error triggering Jenkins job. HTTP Status: $HTTP_STATUS"
+            echo "Response: $TRIGGER_RESPONSE"
+            exit 1
+          fi
+          
+          # Extract queue URL from response
           QUEUE_URL=$(echo "$TRIGGER_RESPONSE" | grep -Fi Location | awk '{print $2}' | tr -d '\r')
-
           if [ -z "$QUEUE_URL" ]; then
             echo "Failed to trigger Jenkins job. Queue URL not found."
             exit 1
           fi
-
           echo "Triggered Jenkins job. Queue URL: $QUEUE_URL"
           echo "queue_url=$QUEUE_URL" >> $GITHUB_ENV
 
-      - name: Wait for Build to Start and Fetch Build Number
+      - name: Wait for Jenkins Job to Start and Fetch Build Number
         id: fetch-build-number
         run: |
           set -e
-          JENKINS_URL="http://52.23.210.174:8080/"
-          USERNAME="nive"
-          TOKEN="11b1e6f6d299def40613f769564a398f16"
           QUEUE_URL="${{ env.queue_url }}"
-          
+          USERNAME="nive"
+          TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
           echo "Polling Jenkins queue to fetch build number..."
+          
           BUILD_NUMBER="null"
           for i in {1..30}; do
             BUILD_NUMBER=$(curl -s -u $USERNAME:$TOKEN "${QUEUE_URL}api/json" | jq -r '.executable.number')
@@ -74,59 +93,49 @@ jobs:
             echo "Waiting for build to be scheduled... Attempt: $i"
             sleep 5
           done
-
+          
           if [ "$BUILD_NUMBER" == "null" ]; then
-            echo "Failed to retrieve the build number from Jenkins queue after multiple attempts."
+            echo "Failed to retrieve build number after multiple attempts."
             exit 1
           fi
-
+          
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
 
       - name: Check Jenkins Job Status
-        id: jenkins-status
-        env:
-          JOB_NAME: "pipeline1"
-          JENKINS_URL: "http://52.23.210.174:8080/"
-          USERNAME: "nive"
-          TOKEN: "11b1e6f6d299def40613f769564a398f16"
-          BUILD_NUMBER: "${{ env.build_number }}" # Pass the build number from a previous step
         run: |
-         set -e
-         echo "Checking the status of the Jenkins job..."
-         STATUS="null"
-         for i in {1..60}; do
-           BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/api/json")
-           STATUS=$(echo $BUILD_INFO | jq -r '.result')
-           if [ "$STATUS" != "null" ]; then
-             break
-           fi
-           echo "Waiting for build to complete... Attempt: $i"
-           sleep 10
-         done
-
-         if [ "$STATUS" == "null" ]; then
-           echo "Failed to fetch the status of the Jenkins job after multiple attempts."
-           exit 1
-         fi
-
-  
-         if [ "$STATUS" == "FAILURE" ]; then
-          BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
-          echo "Build failed with error log: $BUILD_LOG"
-         fi
-
-   
-         BUILD_TIMESTAMP=$(echo $BUILD_INFO | jq -r '.timestamp')
-         BUILD_DATE=$(date -d @"$(($BUILD_TIMESTAMP / 1000))" +'%Y-%m-%d %H:%M:%S' || date -r $(($BUILD_TIMESTAMP / 1000)) '+%Y-%m-%d %H:%M:%S')
-
-         echo "Job Status: $STATUS"
-         echo "Build Number: $BUILD_NUMBER"
-         echo "Build Date: $BUILD_DATE"
-
-    
-         echo "status=$STATUS" >> $GITHUB_ENV
-         echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
-         echo "build_date=$BUILD_DATE" >> $GITHUB_ENV
+          set -e
+          JENKINS_URL="http://52.23.210.174:8080/"
+          JOB_NAME="pipeline1"
+          BUILD_NUMBER="${{ env.build_number }}"
+          USERNAME="nive"
+          TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
+          echo "Checking Jenkins job status..."
+          
+          STATUS="null"
+          for i in {1..60}; do
+            BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/api/json")
+            STATUS=$(echo $BUILD_INFO | jq -r '.result')
+            if [ "$STATUS" != "null" ]; then
+              break
+            fi
+            echo "Waiting for build to complete... Attempt: $i"
+            sleep 10
+          done
+          
+          if [ "$STATUS" == "null" ]; then
+            echo "Failed to fetch status after multiple attempts."
+            exit 1
+          fi
+          
+          echo "Job Status: $STATUS"
+          
+          if [ "$STATUS" == "FAILURE" ]; then
+            BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
+            echo "Build failed. Logs: $BUILD_LOG"
+            exit 1
+          fi
+          
+          echo "Build completed successfully!"
           
       - name: Remove Conflicting Packages
         run: |
