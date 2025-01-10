@@ -203,15 +203,20 @@ jobs:
         run: |
           echo "Installing Aether using Helm..."
           
-          # Add Helm repository for Aether
-          helm repo add aether https://example.com/aether-charts
-          helm repo update
+          # Add Helm repository for Aether (replace with the actual repository URL)
+          helm repo add aether https://your-repo-url/aether-charts || { echo "Failed to add Aether repo"; exit 1; }
           
-          # Install Aether
-          helm install aether aether/aether-core --values aether-values.yaml
+          # Update Helm repo to fetch the latest charts
+          helm repo update 
+          
+          # Install Aether using Helm, using the appropriate values.yaml file
+          helm install aether aether/aether-core --values aether-values.yaml 
           
           # Verify installation
-          helm list
+          helm list 
+          
+          # Check for pods running after installation
+          kubectl get pods -l app=aether 
 
       - name: Install SD-Core using Helm
         run: |
