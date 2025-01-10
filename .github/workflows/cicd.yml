@@ -73,7 +73,6 @@ jobs:
           fi
           echo "Triggered Jenkins job. Queue URL: $QUEUE_URL"
           echo "queue_url=$QUEUE_URL" >> $GITHUB_ENV
-
       - name: Wait for Jenkins Job to Start and Fetch Build Number
         id: fetch-build-number
         run: |
@@ -100,7 +99,6 @@ jobs:
           fi
           
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
-
       - name: Check Jenkins Job Status
         run: |
           set -e
@@ -143,7 +141,6 @@ jobs:
           sudo apt-get autoremove -y
           sudo apt-mark unhold containerd || true  # Ensure no held packages
           sudo apt-get update -y
-          
       - name: Install Prerequisites
         run: |
           if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
@@ -161,13 +158,11 @@ jobs:
           make --version  # Verify make installation
           echo "PATH=$PATH:/usr/bin:$HOME/.local/bin" >> $GITHUB_ENV
           source $GITHUB_ENV  # Ensure new PATH is applied
-
       - name: Debug PATH and Installed Tools
         run: |
           echo "Current PATH: $PATH"
           which sed || echo "sed not found"
           ls -l /usr/bin/sed || echo "/usr/bin/sed not found"
-
       - name: Verify hosts.ini File
         run: |
           if [ ! -f hosts.ini ]; then
@@ -175,7 +170,6 @@ jobs:
             echo "[all]" > hosts.ini  # Add basic structure for Ansible
           fi
           echo "hosts.ini file verified."
-
       - name: Update Configuration Files
         shell: bash
         run: |
@@ -193,16 +187,14 @@ jobs:
           else
             echo "hosts.ini file not found. Cannot proceed with updates."
             exit 1
-          
+          fi
       - name: Set up Docker authentication for GHCR
         run: |
           sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
-          
       - name: Install Kubernetes
-        shell: bash 
+        shell: bash
         run: |
           echo "Installing Kubernetes for Aether..."
-          
           # Verify and install kubectl if necessary
           if ! kubectl version --client=true &> /dev/null; then
             echo "kubectl is not installed or not accessible. Installing it..."
@@ -211,37 +203,31 @@ jobs:
           else
             echo "kubectl is already installed. Proceeding..."
           fi
-          
-          # Set up kubeconfig for authentication
-          echo "${{ secrets.KUBE_CONFIG }}" > $HOME/.kube/config
-
           # Verify the presence of aether-config.yaml
           if [ ! -f aether-config.yaml ]; then
             echo "Error: aether-config.yaml file is missing. Please ensure it's present in the repository."
             exit 1
           fi
-          
           # Check Kubernetes API server availability
           echo "Verifying Kubernetes API server connectivity..."
           if ! kubectl cluster-info &> /dev/null; then
             echo "Error: Unable to connect to the Kubernetes API server. Please ensure the cluster is running and accessible."
-            kubectl config current-context  # Show the current context for debugging
-            kubectl cluster-info  # Fetch detailed cluster info for debugging
             exit 1
           fi
-          
           # Apply the Kubernetes configuration
           echo "Applying Kubernetes configuration from aether-config.yaml..."
           if ! kubectl apply -f aether-config.yaml --validate=false; then
             echo "Error: Failed to apply aether-config.yaml. Please check the file and the Kubernetes cluster."
             exit 1
           fi
-          
           # Verify that the configuration was applied successfully
           echo "Verifying Kubernetes resources..."
           if ! kubectl get pods --all-namespaces; then
             echo "Error: Unable to fetch pods. Please check your Kubernetes setup."
             exit 1
           fi
-          
           echo "Kubernetes installation and configuration applied successfully."
+      - name: Install SD-Core
+        run: |
+          make aether-5gc-install  # Running from repo home
+          kubectl get pods -n omec
