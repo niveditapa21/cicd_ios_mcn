@@ -196,9 +196,34 @@ jobs:
           sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
           
       - name: Install Kubernetes
-        shell: bash 
+        shell: bash
         run: |
-          make aether-k8s-install  # Running from repo home
+          echo "Installing Kubernetes for Aether..."
+   
+          if ! kubectl version --client=true &> /dev/null; then
+              echo "kubectl is not installed or not accessible. Installing it..."
+              sudo curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+              sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          fi
+
+   
+          if [ ! -f aether-config.yaml ]; then
+          echo "Error: aether-config.yaml file is missing. Please check your repository."
+          exit 1
+          fi
+
+          echo "Applying Kubernetes configuration from aether-config.yaml..."
+          kubectl apply -f aether-config.yaml --validate=false || {
+             echo "Error: Failed to apply aether-config.yaml. Ensure the Kubernetes API server is running and accessible."
+             exit 1
+          }
+
+          echo "Verifying Kubernetes resources..."
+          kubectl get pods --all-namespaces || {
+            echo "Error: Unable to fetch pods. Please check your Kubernetes setup."
+            exit 1
+          }
+
         
       - name: Install SD-Core
         run: |
