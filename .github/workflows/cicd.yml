@@ -6,11 +6,15 @@ on:
       server_ip:
         description: 'The server IP address'
         required: true
-        default: '54.92.193.42'
+        default: '52.23.210.174'
       branch_name:
         description: 'The branch name to use'
         required: true
         default: 'main'
+      port:
+        description: "The port to deploy the application on (between 8000 and 9000)"
+        required: true
+        default: "8080"
 
 jobs:
   install:
@@ -20,18 +24,116 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v2
 
-      - name: Set Up Variables
+      - name: Basic Environment Check
         run: |
-          echo "SERVER_IP=${{ github.event.inputs.server_ip }}" >> $GITHUB_ENV
-          echo "BRANCH_NAME=${{ github.event.inputs.branch_name }}" >> $GITHUB_ENV
+          set -e
+          JOB_NAME="pipeline1"
+          JENKINS_URL="http://52.23.210.174:8080/"
+          USERNAME="nive"
+          TOKEN="11b1e6f6d299def40613f769564a398f16"
+          DEPLOYMENT_SERVER="${{ github.event.inputs.deployment_server }}"
+          PORT="${{ github.event.inputs.port }}"
+          BRANCH_NAME="${{ github.event.inputs.branch_name }}"
 
+          # URL encode parameters
+          DEPLOYMENT_SERVER_ENCODED=$(echo $DEPLOYMENT_SERVER | jq -s -R -r @uri)
+          PORT_ENCODED=$(echo $PORT | jq -s -R -r @uri)
+          BRANCH_NAME_ENCODED=$(echo $BRANCH_NAME | jq -s -R -r @uri)
+
+          # Trigger the Jenkins parameterized job with inputs
+          TRIGGER_RESPONSE=$(curl -X POST -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?DEPLOYMENT_SERVER=$DEPLOYMENT_SERVER_ENCODED&PORT=$PORT_ENCODED&BRANCH_NAME=$BRANCH_NAME_ENCODED" -i)
+          
+          # Extract the queue URL from the trigger response to track the build
+          QUEUE_URL=$(echo "$TRIGGER_RESPONSE" | grep -Fi Location | awk '{print $2}' | tr -d '\r')
+
+          if [ -z "$QUEUE_URL" ]; then
+            echo "Failed to trigger Jenkins job. Queue URL not found."
+            exit 1
+          fi
+
+          echo "Triggered Jenkins job. Queue URL: $QUEUE_URL"
+          echo "queue_url=$QUEUE_URL" >> $GITHUB_ENV
+
+      - name: Wait for Build to Start and Fetch Build Number
+        id: fetch-build-number
+        run: |
+          set -e
+          JENKINS_URL="http://52.23.210.174:8080/"
+          USERNAME="nive"
+          TOKEN="11b1e6f6d299def40613f769564a398f16"
+          QUEUE_URL="${{ env.queue_url }}"
+          
+          echo "Polling Jenkins queue to fetch build number..."
+          BUILD_NUMBER="null"
+          for i in {1..30}; do
+            BUILD_NUMBER=$(curl -s -u $USERNAME:$TOKEN "${QUEUE_URL}api/json" | jq -r '.executable.number')
+            if [ "$BUILD_NUMBER" != "null" ]; then
+              echo "Build number: $BUILD_NUMBER"
+              break
+            fi
+            echo "Waiting for build to be scheduled... Attempt: $i"
+            sleep 5
+          done
+
+          if [ "$BUILD_NUMBER" == "null" ]; then
+            echo "Failed to retrieve the build number from Jenkins queue after multiple attempts."
+            exit 1
+          fi
+
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
+
+      - name: Check Jenkins Job Status
+        id: jenkins-status
+        env:
+          JOB_NAME: "pipeline1"
+          JENKINS_URL: "http://52.23.210.174:8080/"
+          USERNAME: "nive"
+          TOKEN: "11b1e6f6d299def40613f769564a398f16"
+          BUILD_NUMBER: "${{ env.build_number }}" # Pass the build number from a previous step
+        run: |
+         set -e
+         echo "Checking the status of the Jenkins job..."
+         STATUS="null"
+         for i in {1..60}; do
+           BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/api/json")
+           STATUS=$(echo $BUILD_INFO | jq -r '.result')
+           if [ "$STATUS" != "null" ]; then
+             break
+           fi
+           echo "Waiting for build to complete... Attempt: $i"
+           sleep 10
+         done
+
+         if [ "$STATUS" == "null" ]; then
+           echo "Failed to fetch the status of the Jenkins job after multiple attempts."
+           exit 1
+         fi
+
+  
+         if [ "$STATUS" == "FAILURE" ]; then
+          BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
+          echo "Build failed with error log: $BUILD_LOG"
+         fi
+
+   
+         BUILD_TIMESTAMP=$(echo $BUILD_INFO | jq -r '.timestamp')
+         BUILD_DATE=$(date -d @"$(($BUILD_TIMESTAMP / 1000))" +'%Y-%m-%d %H:%M:%S' || date -r $(($BUILD_TIMESTAMP / 1000)) '+%Y-%m-%d %H:%M:%S')
+
+         echo "Job Status: $STATUS"
+         echo "Build Number: $BUILD_NUMBER"
+         echo "Build Date: $BUILD_DATE"
+
+    
+         echo "status=$STATUS" >> $GITHUB_ENV
+         echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
+         echo "build_date=$BUILD_DATE" >> $GITHUB_ENV
+          
       - name: Remove Conflicting Packages
         run: |
           sudo apt-get remove --purge -y containerd
           sudo apt-get autoremove -y
-          sudo apt-mark unhold containerd || true
+          sudo apt-mark unhold containerd || true  # Ensure no held packages
           sudo apt-get update -y
-
       - name: Install Prerequisites
         run: |
           if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
@@ -44,45 +146,38 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y containerd.io
           sudo apt-get install -y git curl make net-tools pipx python3-venv sshpass netplan.io iptables jq sed
-          pipx install --include-deps ansible || true
+          pipx install --include-deps ansible || true  # Ignore if already installed
           pipx ensurepath
-          make --version
-
+          make --version  # Verify make installation
+          echo "PATH=$PATH:/usr/bin:$HOME/.local/bin" >> $GITHUB_ENV
+          source $GITHUB_ENV  # Ensure new PATH is applied
       - name: Debug PATH and Installed Tools
         run: |
           echo "Current PATH: $PATH"
           which sed || echo "sed not found"
           ls -l /usr/bin/sed || echo "/usr/bin/sed not found"
-
+      - name: Update Configuration Files
+        shell: bash
+        run: |
+          # Replace content of line 2 with the new node1 IP and credentials
+          #sed -i '2s/.*/node1 ansible_host=localhost ansible_user=ios5gn ansible_password=ios5gn ansible_sudo_pass=ios5gn/' hosts.ini
+          ##sed -i '3s/^/#/' hosts.ini
+          #sed -i '10s/^/#/' hosts.ini
+          #sed -i '11s/^/#/' hosts.ini
+          # Verify the updated hosts.ini content
+          echo "Updated hosts.ini content:"
+          cat hosts.ini
       - name: Set up Docker authentication for GHCR
         run: |
-          echo "${{ secrets.GHCRPASS }}" | sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin
-
+          sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
+          
       - name: Install Kubernetes
         shell: bash 
         run: |
-          make -f custom-makefile-name aether-k8s-install
-          
-
+          make aether-k8s-install  # Running from repo home
+        
       - name: Install SD-Core
         run: |
-          make aether-5gc-install
+          make aether-5gc-install  # Running from repo home
           kubectl get pods -n omec
-
-  test:
-    runs-on: ubuntu-latest
-    needs: install
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
-
-      - name: Test Kubernetes Pods
-        run: |
-          echo "Checking if pods are deployed..."
-          kubectl get pods -n omec
-          if [[ $(kubectl get pods -n omec | grep Running | wc -l) -gt 0 ]]; then
-            echo "Deployment successful: Pods are running."
-          else
-            echo "Deployment failed: No running pods found."
-            exit 1
-          fi
+    
