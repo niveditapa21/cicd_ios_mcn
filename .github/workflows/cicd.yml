@@ -195,45 +195,18 @@ jobs:
         run: |
           sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
           
-      - name: Install Helm
+      - name: Install Kubernetes
+        shell: bash 
         run: |
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          
-      - name: Install Aether using Helm
-        run: |
-          echo "Installing Aether using Helm..."
-          
-          # Add Helm repository for Aether (replace with the actual repository URL)
-          helm repo add aether https://your-repo-url/aether-charts || { echo "Failed to add Aether repo"; exit 1; }
-          
-          # Update Helm repo to fetch the latest charts
-          helm repo update 
-          
-          # Install Aether using Helm, using the appropriate values.yaml file
-          helm install aether aether/aether-core --values aether-values.yaml 
-          
-          # Verify installation
-          helm list 
-          
-          # Check for pods running after installation
-          kubectl get pods -l app=aether 
-
-      - name: Install SD-Core using Helm
-        run: |
-          echo "Installing SD-Core using Helm..."
-          
-          # Add Helm repository for SD-Core (replace with actual SD-Core repo)
-          helm repo add sd-core https://example.com/sd-core-charts
-          helm repo update
-          
-          # Install SD-Core
-          helm install sd-core sd-core/sd-core-core --values sd-core-values.yaml
-          
-          # Verify installation
-          helm list
-
-      - name: Check Kubernetes Installation
-        run: |
-          kubectl get nodes
+          sudo apt install sshpass python3-venv pipx make git
+          pipx install --include-deps ansible
+          pipx ensurepath
+          git clone --recursive https://github.com/opennetworkinglab/aether-onramp.git
+          cd aether-onramp
+          make aether-k8s-install
           kubectl get pods --all-namespaces
-          kubectl describe nodes
+        
+      - name: Install SD-Core
+        run: |
+          make aether-5gc-install  # Running from repo home
+          kubectl get pods -n omec
