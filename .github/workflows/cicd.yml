@@ -42,6 +42,11 @@ jobs:
       - name: Trigger Jenkins Parameterized Job
         run: |
           set -e
+          
+          # Ensure jq is installed
+          sudo apt-get update -y
+          sudo apt-get install -y jq curl
+
           JENKINS_URL="http://52.23.210.174:8080/"
           JOB_NAME="pipeline1"
           USERNAME="nive"
@@ -53,9 +58,17 @@ jobs:
           RUN_NETWORK_TEST=${{ github.event.inputs.run_network_test }}
           RUN_BUILD_SIM=${{ github.event.inputs.run_build_sim }}
           
+          # Check Jenkins URL
+          echo "Checking Jenkins server availability..."
+          curl -s -o /dev/null -w "%{http_code}" "$JENKINS_URL"
+          if [[ $? -ne 0 ]]; then
+            echo "Error: Unable to reach Jenkins server at $JENKINS_URL"
+            exit 1
+          fi
+
           # Trigger Jenkins job with parameters
           TRIGGER_RESPONSE=$(curl -v -X POST -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/buildWithParameters?RUN_BASIC_ENV=$RUN_BASIC_ENV&RUN_FILE_OPS=$RUN_FILE_OPS&RUN_NETWORK_TEST=$RUN_NETWORK_TEST&RUN_BUILD_SIM=$RUN_BUILD_SIM" -i)
-          
+
           # Check HTTP status code for success (201)
           HTTP_STATUS=$(echo "$TRIGGER_RESPONSE" | head -n 1 | awk '{print $2}')
           echo "Jenkins response status: $HTTP_STATUS"
@@ -73,15 +86,17 @@ jobs:
           fi
           echo "Triggered Jenkins job. Queue URL: $QUEUE_URL"
           echo "queue_url=$QUEUE_URL" >> $GITHUB_ENV
+
       - name: Wait for Jenkins Job to Start and Fetch Build Number
         id: fetch-build-number
         run: |
           set -e
+          
           QUEUE_URL="${{ env.queue_url }}"
           USERNAME="nive"
           TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
           echo "Polling Jenkins queue to fetch build number..."
-          
+
           BUILD_NUMBER="null"
           for i in {1..30}; do
             BUILD_NUMBER=$(curl -s -u $USERNAME:$TOKEN "${QUEUE_URL}api/json" | jq -r '.executable.number')
@@ -99,17 +114,20 @@ jobs:
           fi
           
           echo "build_number=$BUILD_NUMBER" >> $GITHUB_ENV
+
       - name: Check Jenkins Job Status
         run: |
           set -e
+          
           JENKINS_URL="http://52.23.210.174:8080/"
           JOB_NAME="pipeline1"
           BUILD_NUMBER="${{ env.build_number }}"
           USERNAME="nive"
           TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
-          echo "Checking Jenkins job status..."
           
+          echo "Checking Jenkins job status..."
           STATUS="null"
+          
           for i in {1..60}; do
             BUILD_INFO=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/api/json")
             STATUS=$(echo $BUILD_INFO | jq -r '.result')
@@ -134,13 +152,14 @@ jobs:
           fi
           
           echo "Build completed successfully!"
-          
+
       - name: Remove Conflicting Packages
         run: |
           sudo apt-get remove --purge -y containerd
           sudo apt-get autoremove -y
           sudo apt-mark unhold containerd || true  # Ensure no held packages
           sudo apt-get update -y
+
       - name: Install Prerequisites
         run: |
           if [ ! -f /usr/share/keyrings/docker-archive-keyring.gpg ]; then
@@ -158,11 +177,13 @@ jobs:
           make --version  # Verify make installation
           echo "PATH=$PATH:/usr/bin:$HOME/.local/bin" >> $GITHUB_ENV
           source $GITHUB_ENV  # Ensure new PATH is applied
+
       - name: Debug PATH and Installed Tools
         run: |
           echo "Current PATH: $PATH"
           which sed || echo "sed not found"
           ls -l /usr/bin/sed || echo "/usr/bin/sed not found"
+
       - name: Verify hosts.ini File
         run: |
           if [ ! -f hosts.ini ]; then
@@ -170,80 +191,65 @@ jobs:
             echo "[all]" > hosts.ini  # Add basic structure for Ansible
           fi
           echo "hosts.ini file verified."
+
       - name: Update Configuration Files
         shell: bash
         run: |
-          # Check if the hosts.ini file exists
           if [ -f hosts.ini ]; then
-            # Replace content of line 2 with the new node1 IP and credentials
             sed -i '2s/.*/node1 ansible_host=localhost ansible_user=ios5gn ansible_password=ios5gn ansible_sudo_pass=ios5gn/' hosts.ini
-            # Comment out lines 3, 10, and 11 as required
             sed -i '3s/^/#/' hosts.ini
             sed -i '10s/^/#/' hosts.ini
             sed -i '11s/^/#/' hosts.ini
-            # Verify the updated hosts.ini content
             echo "Updated hosts.ini content:"
             cat hosts.ini
           else
             echo "hosts.ini file not found. Cannot proceed with updates."
             exit 1
           fi
+
       - name: Set up Docker authentication for GHCR
         run: |
           sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
-      
-      # name: Install Kubernetes
-        #shell: bash 
-        #run: |
-          #make aether-k8s-install --validate=false # Running from repo home
-        
-      # name: Install SD-Core
-        # run: |
-          # make aether-5gc-install --validate=false  # Running from repo home
-          # kubectl get pods -n omec
 
+      # Testing Jenkins Job Trigger
       - name: Testing Jenkins Job Trigger
         run: |
-         JOB_NAME="pipeline1"
-         USERNAME="nive"
-         TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
-         JENKINS_URL="http://52.23.210.174:8080/"
-         PARAMS="RUN_BASIC_ENV=true&RUN_FILE_OPS=false&RUN_NETWORK_TEST=false&RUN_BUILD_SIM=false"
-         TEST_URL="${JENKINS_URL}job/${JOB_NAME}/buildWithParameters?$PARAMS"
-         TEST_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response_body.txt -X POST -u $USERNAME:$TOKEN "$TEST_URL")
-         HTTP_STATUS_TEST="${TEST_RESPONSE: -3}"
-         RESPONSE_BODY=$(cat /tmp/response_body.txt)
-         echo "Jenkins response status for test job: $HTTP_STATUS_TEST"
-         echo "Jenkins response body: $RESPONSE_BODY"
-         if [[ "$HTTP_STATUS_TEST" != "201" ]]; then
-          echo "Error triggering testing job. HTTP Status: $HTTP_STATUS_TEST"
-          echo "Response body: $RESPONSE_BODY"
-          exit 1
-         fi
-         echo "Testing job triggered successfully."
-         QUEUE_URL=$(echo "$RESPONSE_BODY" | grep -Fi Location | awk '{print $2}' | tr -d '\r')
-         if [ -z "$QUEUE_URL" ]; then
-           echo "Queue URL not found. Skipping log fetch."
-         else
-          echo "Polling Jenkins queue to fetch build number..."
-          BUILD_NUMBER="null"
-          for i in {1..30}; do
-            BUILD_NUMBER=$(curl -s -u $USERNAME:$TOKEN "${QUEUE_URL}api/json" | jq -r '.executable.number')
-            if [ "$BUILD_NUMBER" != "null" ]; then
-              echo "Build number: $BUILD_NUMBER"
-              break
-            fi
-            echo "Waiting for build to be scheduled... Attempt: $i"
-            sleep 5
-          done
-
-          if [ "$BUILD_NUMBER" == "null" ]; then
-            echo "Failed to retrieve build number after multiple attempts."
+          JOB_NAME="pipeline1"
+          USERNAME="nive"
+          TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
+          JENKINS_URL="http://52.23.210.174:8080/"
+          PARAMS="RUN_BASIC_ENV=true&RUN_FILE_OPS=false&RUN_NETWORK_TEST=false&RUN_BUILD_SIM=false"
+          TEST_URL="${JENKINS_URL}job/${JOB_NAME}/buildWithParameters?$PARAMS"
+          TEST_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response_body.txt -X POST -u $USERNAME:$TOKEN "$TEST_URL")
+          HTTP_STATUS_TEST="${TEST_RESPONSE: -3}"
+          RESPONSE_BODY=$(cat /tmp/response_body.txt)
+          echo "Jenkins response status for test job: $HTTP_STATUS_TEST"
+          echo "Jenkins response body: $RESPONSE_BODY"
+          if [[ "$HTTP_STATUS_TEST" != "201" ]]; then
+            echo "Error triggering testing job. HTTP Status: $HTTP_STATUS_TEST"
+            echo "Response body: $RESPONSE_BODY"
             exit 1
           fi
-
-          echo "Fetching Jenkins job console logs for build $BUILD_NUMBER..."
-          BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
-          echo "Latest build logs:"
-          echo "$BUILD_LOG"
-         fi
+          echo "Testing job triggered successfully."
+          QUEUE_URL=$(echo "$RESPONSE_BODY" | grep -Fi Location | awk '{print $2}' | tr -d '\r')
+          if [ -z "$QUEUE_URL" ]; then
+            echo "Queue URL not found. Skipping log fetch."
+          else
+            BUILD_NUMBER="null"
+            for i in {1..30}; do
+              BUILD_NUMBER=$(curl -s -u $USERNAME:$TOKEN "${QUEUE_URL}api/json" | jq -r '.executable.number')
+              if [ "$BUILD_NUMBER" != "null" ]; then
+                echo "Build number: $BUILD_NUMBER"
+                break
+              fi
+              echo "Waiting for build to be scheduled... Attempt: $i"
+              sleep 5
+            done
+            if [ "$BUILD_NUMBER" == "null" ]; then
+              echo "Failed to retrieve build number after multiple attempts."
+              exit 1
+            fi
+            BUILD_LOG=$(curl -s -u $USERNAME:$TOKEN "$JENKINS_URL/job/$JOB_NAME/$BUILD_NUMBER/consoleText" | tail -n 50)
+            echo "Latest build logs:"
+            echo "$BUILD_LOG"
+          fi
