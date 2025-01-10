@@ -202,15 +202,23 @@ jobs:
           # make aether-5gc-install --validate=false  # Running from repo home
           # kubectl get pods -n omec
 
-      - name: Testing jenkins jobs
+      - name: Testing Jenkins Job Trigger
         run: |
           JOB_NAME="pipeline1"
           USERNAME="nive"
           TOKEN="11f5c648d7bdba8fa9502f4ec84db7680c"
           JENKINS_URL="http://52.23.210.174:8080/"
-          PARAMS="RUN_BASIC_ENV=true&RUN_FILE_OPS=false&RUN_NETWORK_TEST=false&RUN_BUILD_SIM=false"  # Example parameters
+          PARAMS="RUN_BASIC_ENV=true&RUN_FILE_OPS=false&RUN_NETWORK_TEST=false&RUN_BUILD_SIM=false"
           TEST_URL="${JENKINS_URL}job/${JOB_NAME}/buildWithParameters?$PARAMS"
-          TEST_RESPONSE=$(curl -v -X POST -u $USERNAME:$TOKEN "$TEST_URL" -i)
-          HTTP_STATUS_TEST=$(echo "$TEST_RESPONSE" | head -n 1 | awk '{print $2}')
+          TEST_RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response_body.txt -X POST -u $USERNAME:$TOKEN "$TEST_URL")
+          HTTP_STATUS_TEST="${TEST_RESPONSE: -3}"
+          RESPONSE_BODY=$(cat /tmp/response_body.txt)
           echo "Jenkins response status for test job: $HTTP_STATUS_TEST"
+          echo "Jenkins response body: $RESPONSE_BODY"
+          if [[ "$HTTP_STATUS_TEST" != "201" ]]; then
+            echo "Error triggering testing job. HTTP Status: $HTTP_STATUS_TEST"
+            echo "Response body: $RESPONSE_BODY"
+            exit 1
+          fi
+            echo "Testing job triggered successfully."
 
